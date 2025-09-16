@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Voice Blast</title>
+<style>
+  :root { --pad: 14px; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; max-width: 640px; margin: 24px auto; padding: 0 var(--pad); }
+  h2 { margin: 12px 0; }
+  .card { border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  .row { display: flex; gap: 10px; margin: 12px 0; }
+  .row > * { flex: 1; }
+  label { font-size: 13px; color: #374151; display:block; margin-bottom: 6px; }
+  input, select, textarea { width: 100%; padding: 11px 12px; border: 1px solid #d1d5db; border-radius: 12px; }
+  button { padding: 12px 16px; border: 0; border-radius: 12px; cursor: pointer; font-weight: 600; }
+  .primary { background: #2563eb; color: white; }
+  .ghost { background: #f3f4f6; }
+  .danger { background: #ef4444; color: white; }
+  .muted { color: #6b7280; font-size: 13px; }
+  .status { margin-top: 8px; min-height: 24px; }
+  .footer { margin-top: 18px; font-size: 12px; color: #6b7280; }
+</style>
+</head>
+<body>
+  <h2>Speak &amp; Send</h2>
+  <p class="muted">Tap Record, say your message, Stop, then Send. Your recording is sent securely to Make.</p>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label for="audience">Audience</label>
+        <select id="audience">
+          <option value="all">All Staff</option>
+          <option value="managers">Managers</option>
+          <option value="frontdesk">Front Desk</option>
+        </select>
+      </div>
+      <div>
+        <label for="subject">Subject (optional)</label>
+        <input id="subject" placeholder="E.g., Quick update for today" />
+      </div>
+    </div>
+
+    <div class="row">
+      <button id="recBtn" class="danger">● Record</button>
+      <button id="stopBtn" class="ghost" disabled>■ Stop</button>
+      <button id="sendBtn" class="primary" disabled>✉ Send</button>
+    </div>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="footer">
+    Tip: If this page says microphone permission is blocked, allow mic access in your browser settings for this site.
+  </div>
+
+<script>
+const WEBHOOK = "https://hook.us1.make.com/kn9o6wkh911yoxe2v927qmity6boq16b";
+const SECRET = "CHANGE_ME_Secret123";
+
+let mediaRecorder, chunks = [], lastBlob = null, lastMime = null;
+
+function extFor(mime) {
+  if (!mime) return "webm";
+  if (mime.includes("webm")) return "webm";
+  if (mime.includes("ogg")) return "ogg";
+  if (mime.includes("mp4")) return "m4a";
+  if (mime.includes("aac")) return "aac";
+  if (mime.includes("wav")) return "wav";
+  return "webm";
+}
+
+const recBtn = document.getElementById('recBtn');
+const stopBtn = document.getElementById('stopBtn');
+const sendBtn = document.getElementById('sendBtn');
+const statusEl = document.getElementById('status');
+
+recBtn.onclick = async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    chunks = [];
+    try { mediaRecorder = new MediaRecorder(stream); }
+    catch (e) { mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' }); }
+    lastMime = mediaRecorder.mimeType || null;
+    mediaRecorder.ondataavailable = e => chunks.push(e.data);
+    mediaRecorder.onstop = () => {
+      const type = chunks[0]?.type || lastMime || 'audio/webm';
+      lastBlob = new Blob(chunks, { type });
+      sendBtn.disabled = false;
+      const seconds = Math.max(1, Math.round((lastBlob.size / 32000)));
+      statusEl.textContent = `Recorded ~${seconds}s · ${(lastBlob.size/1024).toFixed(1)} KB (${type})`;
+    };
+    mediaRecorder.start();
+    recBtn.disabled = true; stopBtn.disabled = false; sendBtn.disabled = true;
+    statusEl.textContent = "Recording…";
+  } catch (e) {
+    console.error(e);
+    alert('Microphone permission is required. Please allow access.');
+  }
+};
+
+stopBtn.onclick = () => {
+  mediaRecorder?.stop();
+  recBtn.disabled = false; stopBtn.disabled = true;
+  statusEl.textContent = "Stopped. Ready to send.";
+};
+
+sendBtn.onclick = async () => {
+  if (!lastBlob) return;
+  statusEl.textContent = "Uploading…";
+  const audience = document.getElementById('audience').value;
+  const subject = document.getElementById('subject').value;
+  const filename = `note.${extFor(lastBlob.type)}`;
+
+  const fd = new FormData();
+  fd.append('audio', lastBlob, filename);
+  fd.append('audience', audience);
+  fd.append('subject', subject);
+  fd.append('secret', SECRET);
+
+  try {
+    const res = await fetch(WEBHOOK, { method: 'POST', body: fd });
+    statusEl.textContent = res.ok ? "Sent to Make ✅" : "Sent (check Make) ✅";
+  } catch (e) {
+    statusEl.textContent = "Failed to send ❌ (see console)";
+    console.error(e);
+  }
+};
+</script>
+</body>
+</html>
