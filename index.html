@@ -13,6 +13,7 @@
   .row > * { flex: 1; }
   label { font-size: 13px; color: #374151; display:block; margin-bottom: 6px; }
   input, select, textarea { width: 100%; padding: 11px 12px; border: 1px solid #d1d5db; border-radius: 12px; }
+  textarea { min-height: 120px; resize: vertical; }
   button { padding: 12px 16px; border: 0; border-radius: 12px; cursor: pointer; font-weight: 600; }
   .primary { background: #2563eb; color: white; }
   .ghost { background: #f3f4f6; }
@@ -20,6 +21,7 @@
   .muted { color: #6b7280; font-size: 13px; }
   .status { margin-top: 8px; min-height: 24px; }
   .footer { margin-top: 18px; font-size: 12px; color: #6b7280; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:11px; margin-left:8px; }
 </style>
 </head>
 <body>
@@ -31,11 +33,11 @@
       <div>
         <label for="audience">Audience</label>
         <select id="audience">
-  <option value="all">All Staff</option>
-  <option value="managers">Managers</option>
-  <option value="frontdesk">Front Office</option>
-  <option value="backoffice">Back Office</option>
-</select>
+          <option value="all">All Staff</option>
+          <option value="managers">Managers</option>
+          <option value="frontdesk">Front Office</option>
+          <option value="backoffice">Back Office</option>
+        </select>
       </div>
       <div>
         <label for="subject">Subject (optional)</label>
@@ -47,6 +49,21 @@
       <button id="recBtn" class="danger">● Record</button>
       <button id="stopBtn" class="ghost" disabled>■ Stop</button>
       <button id="sendBtn" class="primary" disabled>✉ Send</button>
+    </div>
+
+    <!-- NEW: live transcript toggle + preview -->
+    <div class="row" style="align-items:center">
+      <div style="flex:0 0 160px">
+        <label>
+          <input type="checkbox" id="livePreviewToggle" />
+          Live text preview
+        </label>
+        <div id="srSupport" class="muted" style="margin-top:4px;"></div>
+      </div>
+      <div>
+        <label for="preview">Text preview (beta) <span class="badge">Web Speech</span></label>
+        <textarea id="preview" placeholder="Your words will appear here while recording…" readonly></textarea>
+      </div>
     </div>
 
     <div class="status" id="status"></div>
@@ -62,6 +79,62 @@ const SECRET = "Secret123";
 
 let mediaRecorder, chunks = [], lastBlob = null, lastMime = null;
 
+// --- Speech Recognition (for live text preview) ---
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+let recognition = null;
+let interimTxt = "", finalTxt = "";
+const previewEl = document.getElementById('preview');
+const liveToggle = document.getElementById('livePreviewToggle');
+const srSupportEl = document.getElementById('srSupport');
+
+if (SR) {
+  srSupportEl.textContent = "Supported in this browser.";
+} else {
+  srSupportEl.textContent = "Not supported in this browser. Try Chrome on desktop.";
+  liveToggle.disabled = true;
+}
+
+function startRecognition() {
+  if (!SR || !liveToggle.checked) return;
+  interimTxt = ""; finalTxt = "";
+  recognition = new SR();
+  recognition.lang = 'en-US';          // tweak if you need other languages
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onresult = (event) => {
+    interimTxt = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const res = event.results[i];
+      if (res.isFinal) {
+        finalTxt += res[0].transcript + " ";
+      } else {
+        interimTxt += res[0].transcript;
+      }
+    }
+    previewEl.value = (finalTxt + (interimTxt ? " " + interimTxt : "")).trim();
+  };
+
+  recognition.onerror = (e) => {
+    console.warn("SpeechRecognition error:", e.error);
+  };
+
+  recognition.onend = () => {
+    // Auto-restart if still recording and toggle is on
+    if (mediaRecorder && mediaRecorder.state === "recording" && liveToggle.checked) {
+      try { recognition.start(); } catch {}
+    }
+  };
+
+  try { recognition.start(); } catch (e) { console.warn(e); }
+}
+
+function stopRecognition() {
+  try { recognition && recognition.stop(); } catch {}
+  recognition = null;
+}
+
+// --- Existing recorder code ---
 function extFor(mime) {
   if (!mime) return "webm";
   if (mime.includes("webm")) return "webm";
@@ -84,6 +157,7 @@ recBtn.onclick = async () => {
     try { mediaRecorder = new MediaRecorder(stream); }
     catch (e) { mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' }); }
     lastMime = mediaRecorder.mimeType || null;
+
     mediaRecorder.ondataavailable = e => chunks.push(e.data);
     mediaRecorder.onstop = () => {
       const type = chunks[0]?.type || lastMime || 'audio/webm';
@@ -92,9 +166,14 @@ recBtn.onclick = async () => {
       const seconds = Math.max(1, Math.round((lastBlob.size / 32000)));
       statusEl.textContent = `Recorded ~${seconds}s · ${(lastBlob.size/1024).toFixed(1)} KB (${type})`;
     };
+
     mediaRecorder.start();
     recBtn.disabled = true; stopBtn.disabled = false; sendBtn.disabled = true;
     statusEl.textContent = "Recording…";
+
+    // Start live text preview if enabled
+    startRecognition();
+
   } catch (e) {
     console.error(e);
     alert('Microphone permission is required. Please allow access.');
@@ -105,6 +184,8 @@ stopBtn.onclick = () => {
   mediaRecorder?.stop();
   recBtn.disabled = false; stopBtn.disabled = true;
   statusEl.textContent = "Stopped. Ready to send.";
+  // Stop live text preview
+  stopRecognition();
 };
 
 sendBtn.onclick = async () => {
@@ -114,11 +195,16 @@ sendBtn.onclick = async () => {
   const subject = document.getElementById('subject').value;
   const filename = `note.${extFor(lastBlob.type)}`;
 
+  // What we'll send as transcript:
+  // prefer whatever's in the preview box (final + last interim already merged)
+  const transcript = (previewEl.value || "").trim();
+
   const fd = new FormData();
   fd.append('audio', lastBlob, filename);
   fd.append('audience', audience);
   fd.append('subject', subject);
   fd.append('secret', SECRET);
+  fd.append('transcript', transcript); // NEW: include text preview
 
   try {
     const res = await fetch(WEBHOOK, { method: 'POST', body: fd });
@@ -128,6 +214,15 @@ sendBtn.onclick = async () => {
     console.error(e);
   }
 };
+
+// Optional: clear preview when toggled off
+liveToggle.addEventListener('change', () => {
+  if (!liveToggle.checked) {
+    stopRecognition();
+  } else if (mediaRecorder && mediaRecorder.state === "recording") {
+    startRecognition();
+  }
+});
 </script>
 </body>
 </html>
