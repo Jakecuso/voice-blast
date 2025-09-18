@@ -45,13 +45,23 @@
       </div>
     </div>
 
+    <!-- NEW: Your name for signature -->
+    <div class="row">
+      <div>
+        <label for="sender">Your name (for signature)</label>
+        <input id="sender" placeholder="e.g., Jake Mancuso" />
+        <div class="muted" style="margin-top:6px;">If provided, your message will end with “— Your Name”.</div>
+      </div>
+    </div>
+
     <div class="row">
       <button id="recBtn" class="danger">● Record</button>
       <button id="stopBtn" class="ghost" disabled>■ Stop</button>
       <button id="sendBtn" class="primary" disabled>✉ Send</button>
+      <button id="resetBtn" class="ghost">↺ Reset</button>
     </div>
 
-    <!-- NEW: live transcript toggle + preview -->
+    <!-- Live transcript toggle + preview -->
     <div class="row" style="align-items:center">
       <div style="flex:0 0 160px">
         <label>
@@ -98,7 +108,7 @@ function startRecognition() {
   if (!SR || !liveToggle.checked) return;
   interimTxt = ""; finalTxt = "";
   recognition = new SR();
-  recognition.lang = 'en-US';          // tweak if you need other languages
+  recognition.lang = 'en-US';
   recognition.continuous = true;
   recognition.interimResults = true;
 
@@ -120,7 +130,6 @@ function startRecognition() {
   };
 
   recognition.onend = () => {
-    // Auto-restart if still recording and toggle is on
     if (mediaRecorder && mediaRecorder.state === "recording" && liveToggle.checked) {
       try { recognition.start(); } catch {}
     }
@@ -134,7 +143,7 @@ function stopRecognition() {
   recognition = null;
 }
 
-// --- Existing recorder code ---
+// --- Audio recording helpers ---
 function extFor(mime) {
   if (!mime) return "webm";
   if (mime.includes("webm")) return "webm";
@@ -171,9 +180,7 @@ recBtn.onclick = async () => {
     recBtn.disabled = true; stopBtn.disabled = false; sendBtn.disabled = true;
     statusEl.textContent = "Recording…";
 
-    // Start live text preview if enabled
     startRecognition();
-
   } catch (e) {
     console.error(e);
     alert('Microphone permission is required. Please allow access.');
@@ -184,7 +191,6 @@ stopBtn.onclick = () => {
   mediaRecorder?.stop();
   recBtn.disabled = false; stopBtn.disabled = true;
   statusEl.textContent = "Stopped. Ready to send.";
-  // Stop live text preview
   stopRecognition();
 };
 
@@ -193,18 +199,22 @@ sendBtn.onclick = async () => {
   statusEl.textContent = "Uploading…";
   const audience = document.getElementById('audience').value;
   const subject = document.getElementById('subject').value;
+  const sender = (document.getElementById('sender').value || "").trim();
   const filename = `note.${extFor(lastBlob.type)}`;
 
-  // What we'll send as transcript:
-  // prefer whatever's in the preview box (final + last interim already merged)
-  const transcript = (previewEl.value || "").trim();
+  // Build transcript and append signature if provided
+  let transcript = (previewEl.value || "").trim();
+  if (sender) {
+    transcript = transcript ? `${transcript}\n\n— ${sender}` : `— ${sender}`;
+  }
 
   const fd = new FormData();
   fd.append('audio', lastBlob, filename);
   fd.append('audience', audience);
   fd.append('subject', subject);
   fd.append('secret', SECRET);
-  fd.append('transcript', transcript); // NEW: include text preview
+  fd.append('sender', sender);        // NEW: raw sender field
+  fd.append('transcript', transcript); // transcript with optional signature
 
   try {
     const res = await fetch(WEBHOOK, { method: 'POST', body: fd });
@@ -214,8 +224,27 @@ sendBtn.onclick = async () => {
     console.error(e);
   }
 };
+  const resetBtn = document.getElementById('resetBtn');
 
-// Optional: clear preview when toggled off
+resetBtn.onclick = () => {
+  // Stop any recording or speech recognition
+  try { mediaRecorder?.stop(); } catch {}
+  stopRecognition();
+
+  // Clear state
+  lastBlob = null; chunks = []; lastMime = null;
+  previewEl.value = "";
+  document.getElementById('subject').value = "";
+  document.getElementById('sender').value = "";
+  statusEl.textContent = "";
+
+  // Reset button states
+  recBtn.disabled = false;
+  stopBtn.disabled = true;
+  sendBtn.disabled = true;
+};
+
+// Optional: restart SR when toggle changes
 liveToggle.addEventListener('change', () => {
   if (!liveToggle.checked) {
     stopRecognition();
