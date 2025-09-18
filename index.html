@@ -70,6 +70,30 @@
 </style>
 </head>
 <body>
+  <!-- 🔒 PIN Gate Overlay -->
+  <div id="pinGate" style="
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(120deg, rgba(124,58,237,.08), rgba(37,99,235,.10)), rgba(249,250,251,.85);
+    backdrop-filter: blur(6px); z-index:9999;">
+    <div style="width:100%; max-width:360px; background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:18px;
+                box-shadow:0 12px 28px rgba(2,6,23,.10);">
+      <h3 style="margin:0 0 6px; font:600 18px/1.3 system-ui, -apple-system;">Enter PIN</h3>
+      <p class="muted" style="margin:0 0 12px;">Only authorized senders may use this tool.</p>
+
+      <label for="pinInput" style="font-size:13px; color:#374151; font-weight:600; display:block; margin:0 0 6px;">Access PIN</label>
+      <input id="pinInput" type="password" inputmode="numeric" autocomplete="one-time-code" placeholder="••••"
+             style="width:100%; padding:12px; border:1px solid #d1d5db; border-radius:12px;">
+
+      <div style="display:flex; gap:8px; margin-top:12px;">
+        <button id="pinUnlock" class="primary" style="flex:1;">Unlock</button>
+        <button id="pinClear" class="ghost" style="flex:0 0 auto;">Clear</button>
+      </div>
+
+      <div id="pinMsg" class="muted" style="min-height:20px; margin-top:10px;"></div>
+    </div>
+  </div>
+  <!-- 🔒 End PIN Gate -->
+
   <header style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
     <div style="width:36px; height:36px; border-radius:12px; background:linear-gradient(135deg, var(--brand), var(--brand2)); box-shadow:0 8px 16px rgba(37,99,235,.25);"></div>
     <div>
@@ -156,6 +180,82 @@
   </div>
 
 <script>
+  /* ====== PIN Gate (client-side UX lock) ====== */
+// Session storage key + expiry
+const PIN_STORAGE_KEY = "vb_pin_ok";
+const PIN_EXP_HOURS = 24;
+
+// Optional local allowlist (UX only). Leave [] to avoid hardcoding a PIN in the page.
+// Real enforcement should be done in Make with a filter on {{1.pin}}.
+const ALLOWED_PINS = []; // e.g. ["4826", "9001"]
+
+// Elements
+const pinGate  = document.getElementById('pinGate');
+const pinInput = document.getElementById('pinInput');
+const pinUnlock = document.getElementById('pinUnlock');
+const pinClear  = document.getElementById('pinClear');
+const pinMsg    = document.getElementById('pinMsg');
+
+let pinAttempts = 0;
+let pinLockedUntil = 0;
+
+function isPinSessionValid() {
+  try {
+    const raw = localStorage.getItem(PIN_STORAGE_KEY);
+    if (!raw) return false;
+    const { ok, until } = JSON.parse(raw);
+    return ok && Date.now() < until;
+  } catch { return false; }
+}
+function setPinSessionOk() {
+  const until = Date.now() + PIN_EXP_HOURS * 60 * 60 * 1000;
+  localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify({ ok: true, until }));
+}
+function clearPinSession() { localStorage.removeItem(PIN_STORAGE_KEY); }
+
+function showGate(show) {
+  if (!pinGate) return; // safety
+  pinGate.style.display = show ? "flex" : "none";
+  document.body.style.overflow = show ? "hidden" : "";
+}
+
+function softValidate(pin) {
+  if (!ALLOWED_PINS.length) return true;         // no local list → always allow UX, rely on Make
+  return ALLOWED_PINS.includes(String(pin).trim());
+}
+
+function lockout(ms) {
+  pinLockedUntil = Date.now() + ms;
+  pinMsg.textContent = `Too many attempts. Try again in ${(ms/1000)|0}s.`;
+}
+
+function tryUnlock() {
+  if (Date.now() < pinLockedUntil) return;
+  const pin = (pinInput.value || "").trim();
+  if (!pin) { pinMsg.textContent = "Enter your PIN."; return; }
+
+  if (softValidate(pin)) {
+    setPinSessionOk();
+    showGate(false);
+    pinMsg.textContent = "";
+  } else {
+    pinAttempts++;
+    pinMsg.textContent = "Incorrect PIN.";
+    if (pinAttempts >= 5) { pinAttempts = 0; lockout(30 * 1000); } // 30s lock
+  }
+}
+
+// Wire buttons
+if (pinUnlock) pinUnlock.onclick = tryUnlock;
+if (pinClear)  pinClear.onclick  = () => { pinInput.value = ""; pinMsg.textContent = ""; };
+
+// On load: show gate unless session is valid
+if (isPinSessionValid()) showGate(false); else showGate(true);
+
+// Expose helper to include with uploads
+function currentPinForSubmission() {
+  return (pinInput && pinInput.value || "").trim();
+}
 /* ====== Config ====== */
 const WEBHOOK = "https://hook.us1.make.com/kn9o6wkh911yoxe2v927qmity6boq16b";
 const SECRET = "Secret123";
