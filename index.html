@@ -180,18 +180,14 @@
   </div>
 
 <script>
-  /* ====== PIN Gate (client-side UX lock) ====== */
-// Session storage key + expiry
-const PIN_STORAGE_KEY = "vb_pin_ok";
-const PIN_EXP_HOURS = 24;
+  /* ====== PIN Gate (always ask) ====== */
 
-// Optional local allowlist (UX only). Leave [] to avoid hardcoding a PIN in the page.
-// Real enforcement should be done in Make with a filter on {{1.pin}}.
-const ALLOWED_PINS = []; // e.g. ["4826", "9001"]
+// Optional allowlist for soft/local check (real check still in Make)
+const ALLOWED_PINS = ["0824"]; // leave [] and enforce in Make only
 
 // Elements
-const pinGate  = document.getElementById('pinGate');
-const pinInput = document.getElementById('pinInput');
+const pinGate   = document.getElementById('pinGate');
+const pinInput  = document.getElementById('pinInput');
 const pinUnlock = document.getElementById('pinUnlock');
 const pinClear  = document.getElementById('pinClear');
 const pinMsg    = document.getElementById('pinMsg');
@@ -199,28 +195,14 @@ const pinMsg    = document.getElementById('pinMsg');
 let pinAttempts = 0;
 let pinLockedUntil = 0;
 
-function isPinSessionValid() {
-  try {
-    const raw = localStorage.getItem(PIN_STORAGE_KEY);
-    if (!raw) return false;
-    const { ok, until } = JSON.parse(raw);
-    return ok && Date.now() < until;
-  } catch { return false; }
-}
-function setPinSessionOk() {
-  const until = Date.now() + PIN_EXP_HOURS * 60 * 60 * 1000;
-  localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify({ ok: true, until }));
-}
-function clearPinSession() { localStorage.removeItem(PIN_STORAGE_KEY); }
-
 function showGate(show) {
-  if (!pinGate) return; // safety
+  if (!pinGate) return;
   pinGate.style.display = show ? "flex" : "none";
   document.body.style.overflow = show ? "hidden" : "";
 }
 
 function softValidate(pin) {
-  if (!ALLOWED_PINS.length) return true;         // no local list → always allow UX, rely on Make
+  if (!ALLOWED_PINS.length) return true; 
   return ALLOWED_PINS.includes(String(pin).trim());
 }
 
@@ -235,13 +217,12 @@ function tryUnlock() {
   if (!pin) { pinMsg.textContent = "Enter your PIN."; return; }
 
   if (softValidate(pin)) {
-    setPinSessionOk();
     showGate(false);
     pinMsg.textContent = "";
   } else {
     pinAttempts++;
     pinMsg.textContent = "Incorrect PIN.";
-    if (pinAttempts >= 5) { pinAttempts = 0; lockout(30 * 1000); } // 30s lock
+    if (pinAttempts >= 5) { pinAttempts = 0; lockout(30 * 1000); } // 30s lockout
   }
 }
 
@@ -249,8 +230,8 @@ function tryUnlock() {
 if (pinUnlock) pinUnlock.onclick = tryUnlock;
 if (pinClear)  pinClear.onclick  = () => { pinInput.value = ""; pinMsg.textContent = ""; };
 
-// On load: show gate unless session is valid
-if (isPinSessionValid()) showGate(false); else showGate(true);
+// Always show gate on load
+showGate(true);
 
 // Expose helper to include with uploads
 function currentPinForSubmission() {
