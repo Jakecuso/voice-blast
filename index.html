@@ -425,7 +425,8 @@ sendBtn.onclick = async () => {
 
   let transcript = (previewEl.value || "").trim();
   if (sender) transcript = transcript ? `${transcript}\n\n— ${sender}` : `— ${sender}`;
-
+};
+  
 const fd = new FormData();
 fd.append('audio', lastBlob, filename);
 fd.append('audience', audience);
