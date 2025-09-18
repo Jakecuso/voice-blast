@@ -426,26 +426,35 @@ sendBtn.onclick = async () => {
   let transcript = (previewEl.value || "").trim();
   if (sender) transcript = transcript ? `${transcript}\n\n— ${sender}` : `— ${sender}`;
 
-  const fd = new FormData();
-  fd.append('audio', lastBlob, filename);
-  fd.append('audience', audience);
-  fd.append('subject', subject);
-  fd.append('secret', SECRET);
-  fd.append('sender', sender);
-  fd.append('transcript', transcript);
+const fd = new FormData();
+fd.append('audio', lastBlob, filename);
+fd.append('audience', audience);
+fd.append('subject', subject);
+fd.append('secret', SECRET);
+fd.append('sender', sender);
+fd.append('transcript', transcript);
 
-  imageBlobs.forEach((item, i) => {
-    fd.append('images[]', item.blob, item.name || `image-${i+1}.jpg`);
-  });
+// ---- single loop; append to both keys (compat), once each
+const names = [];
+for (let i = 0; i < imageBlobs.length; i++) {
+  const { blob, name } = imageBlobs[i];
+  const n = name || `image-${i+1}.jpg`;
+  names.push(n);
 
-  try {
-    const res = await fetch(WEBHOOK, { method: 'POST', body: fd });
-    statusEl.textContent = res.ok ? "Sent to Make ✅" : "Sent (check Make) ✅";
-  } catch (e) {
-    statusEl.textContent = "Failed to send ❌ (see console)";
-    console.error(e);
-  }
-};
+  fd.append('images', blob, n);     // some Make webhooks populate this
+  fd.append('images[]', blob, n);   // others populate this
+}
+
+fd.append('images_count', String(imageBlobs.length));
+fd.append('images_names', names.join(', '));
+
+try {
+  const res = await fetch(WEBHOOK, { method: 'POST', body: fd });
+  statusEl.textContent = res.ok ? "Sent to Make ✅" : "Sent (check Make) ✅";
+} catch (e) {
+  statusEl.textContent = "Failed to send ❌ (see console)";
+  console.error(e);
+}
 
 resetBtn.onclick = () => {
   try { mediaRecorder?.stop(); } catch {}
